@@ -2,7 +2,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 import os, sys
-from app.model import movie
+from app import models
 
 # Add app to sys.path
 sys.path.append(os.getcwd())
