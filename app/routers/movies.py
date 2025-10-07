@@ -1,74 +1,53 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from app.database import SessionLocal
+from app.models.movie import Movie
+from app.schemas.movie import MovieCreate, MovieResponse
 
-from app import schemas, crud
-from app.core.database import get_db
+router = APIRouter(prefix="/movies", tags=["Movies"])
 
-router = APIRouter(prefix="/movies", tags=["movies"])
+# Database dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# ----------------------
-# CRUD Operations
-# ----------------------
+# Create Movie
+@router.post("/", response_model=MovieResponse)
+def create_movie(movie: MovieCreate, db: Session = Depends(get_db)):
+    new_movie = Movie(**movie.dict())
+    db.add(new_movie)
+    db.commit()
+    db.refresh(new_movie)
+    return new_movie
 
-@router.post("/", response_model=schemas.MovieOut, status_code=status.HTTP_201_CREATED)
-def create_movie(movie: schemas.MovieCreate, db: Session = Depends(get_db)):
-    return crud.create_movie(db, movie)
+# Get All Movies
+@router.get("/", response_model=list[MovieResponse])
+def get_movies(db: Session = Depends(get_db)):
+    return db.query(Movie).all()
 
-@router.get("/", response_model=List[schemas.MovieOut])
-def read_movies(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return crud.get_movies(db, skip=skip, limit=limit)
-
-@router.get("/{movie_id}", response_model=schemas.MovieOut)
-def read_movie(movie_id: int, db: Session = Depends(get_db)):
-    movie = crud.get_movie(db, movie_id)
+# Get Movie by ID
+@router.get("/{movie_id}", response_model=MovieResponse)
+def get_movie(movie_id: int, db: Session = Depends(get_db)):
+    movie = db.query(Movie).filter(Movie.id == movie_id).first()
     if not movie:
         raise HTTPException(status_code=404, detail="Movie not found")
     return movie
 
-@router.put("/{movie_id}", response_model=schemas.MovieOut)
-def update_movie(movie_id: int, movie: schemas.MovieUpdate, db: Session = Depends(get_db)):
-    updated = crud.update_movie(db, movie_id, movie)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Movie not found")
-    return updated
+# Search Movies
+@router.get("/search/", response_model=list[MovieResponse])
+def search_movies(query: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+    """
+    Search movies by title or description (case-insensitive)
+    """
+    results = db.query(Movie).filter(
+        (Movie.title.ilike(f"%{query}%")) |
+        (Movie.description.ilike(f"%{query}%"))
+    ).all()
 
-@router.delete("/{movie_id}")
-def delete_movie(movie_id: int, db: Session = Depends(get_db)):
-    ok = crud.delete_movie(db, movie_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Movie not found")
-    return {"message": "Movie deleted"}
+    if not results:
+        raise HTTPException(status_code=404, detail="No movies found matching your search")
 
-
-# ----------------------
-# Search Routes
-# ----------------------
-
-@router.get("/search/title/{title}", response_model=schemas.MovieOut)
-def search_by_title(title: str, db: Session = Depends(get_db)):
-    movie = crud.get_movie_by_title(db, title)
-    if not movie:
-        raise HTTPException(status_code=404, detail="Movie not found")
-    return movie
-
-@router.get("/search/actor/{actor_name}", response_model=List[schemas.MovieOut])
-def search_by_actor(actor_name: str, db: Session = Depends(get_db)):
-    movies = crud.get_movies_by_actor(db, actor_name)
-    if not movies:
-        raise HTTPException(status_code=404, detail="No movies found for this actor")
-    return movies
-
-@router.get("/search/director/{director_name}", response_model=List[schemas.MovieOut])
-def search_by_director(director_name: str, db: Session = Depends(get_db)):
-    movies = crud.get_movies_by_director(db, director_name)
-    if not movies:
-        raise HTTPException(status_code=404, detail="No movies found for this director")
-    return movies
-
-@router.get("/search/genre/{genre_name}", response_model=List[schemas.MovieOut])
-def search_by_genre(genre_name: str, db: Session = Depends(get_db)):
-    movies = crud.get_movies_by_genre(db, genre_name)
-    if not movies:
-        raise HTTPException(status_code=404, detail="No movies found for this genre")
-    return movies
+    return results
